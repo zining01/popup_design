@@ -77,7 +77,7 @@ def generate_blueprint(grid):
 
             # current line positions
             valley_y = z_val + horizon
-            mountain_y = z_val + horizon + y_val
+            mountain_y = z_val + horizon + (y_val - y_prev)
             
             # draw valley folds
             ax.plot([x, x+1], [valley_y, valley_y], color='blue', lw=2)
@@ -106,7 +106,7 @@ def generate_blueprint(grid):
         # after iterating draw the new horizon line for this column
         # if there were no folds, this will just be a straight line at the current horizon level
         ax.plot([x, x+1], [horizon, horizon], color='blue', lw=2)
-        
+
         # update y_min and y_max for this column
         if y_min_valley is None:
             y_min_valley = 0
