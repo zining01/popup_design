@@ -14,7 +14,7 @@ def optimize_popup_volume(voxel_grid, add_cost=1.0, remove_cost=1.0):
         dp = np.full((z_size, y_max + 1), float('inf'))
         parent = np.zeros((z_size, y_max + 1), dtype=int)
 
-        # Initialize first Z-row (the 'front' of the card)
+        # z=0 is the FRONT of the card
         # Each cell stores the cost of having height h at Z=0, considering the initial configuration
         for h in range(y_max + 1):
             current_col = voxel_grid[x, :, 0]
@@ -23,10 +23,10 @@ def optimize_popup_volume(voxel_grid, add_cost=1.0, remove_cost=1.0):
                    ((h - np.sum(current_col[:h])) * add_cost)
             dp[0, h] = cost
 
-        # Fill DP table (Monotonicity: H[z] must be >= H[z+1])
+        # complete DP table (monotonic e.g. H[z] must be >= H[z+1])
         for z in range(1, z_size):
             for h in range(y_max + 1):
-                prev_costs = dp[z-1, :h+1] # Only consider previous heights that are <= current height
+                prev_costs = dp[z-1, :h+1] # only use previous heights that are <= current height
                 min_prev_h = np.argmin(prev_costs)
                 
                 current_col = voxel_grid[x, :, z]
@@ -36,7 +36,8 @@ def optimize_popup_volume(voxel_grid, add_cost=1.0, remove_cost=1.0):
                 dp[z, h] = dp[z-1, min_prev_h] + edit_cost
                 parent[z, h] = min_prev_h
 
-        # Backtrack optimal heights
+        # backtrack via parent pointers
+        # fill height by placing ones in the final grid up to the chosen height for each z
         curr_h = np.argmin(dp[z_size-1, :])
         for z in range(z_size - 1, -1, -1):
             final_grid[x, :curr_h, z] = 1
@@ -45,6 +46,11 @@ def optimize_popup_volume(voxel_grid, add_cost=1.0, remove_cost=1.0):
     return final_grid
 
 def generate_blueprint(grid):
+    """
+    Generates a 2D blueprint from the optimized 3D voxel grid.
+
+    grid: 3D numpy array of shape (size_x, size_y, size_z) where 1 indicates a voxel and 0 indicates empty space.
+    """
     size_x, size_y, size_z = grid.shape
     fig, ax = plt.subplots(figsize=(size_x, size_z + size_y))
 
@@ -156,6 +162,13 @@ def generate_blueprint(grid):
     plt.show()
 
 def visualize_results(initial, final=None, size=10):
+    """
+    Visualizes the initial and final voxel grids in 3D.
+    
+    initial: 3D numpy array of shape (size, size, size) representing the initial voxel configuration.
+    final: Optional 3D numpy array of the same shape representing the optimized voxel configuration.
+    size: The size of the voxel grid (assumed cubic).
+    """
     plt.close('all') 
     fig = plt.figure(figsize=(10, 5) if final is not None else (6, 6), layout='constrained')
     
