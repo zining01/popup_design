@@ -46,117 +46,59 @@ def optimize_popup_volume(voxel_grid, add_cost=1.0, remove_cost=1.0):
     return final_grid
 
 def generate_blueprint(grid):
-    """
-    Generates a 2D blueprint from the optimized 3D voxel grid.
-
-    grid: 3D numpy array of shape (size_x, size_y, size_z) where 1 indicates a voxel and 0 indicates empty space.
-    """
     size_x, size_y, size_z = grid.shape
-    fig, ax = plt.subplots(figsize=(size_x, size_z + size_y))
+    fig, ax = plt.subplots(figsize=(size_x, (size_z + size_y) / 2))
 
-    # store bounds for cuts to avoid overlaps
-    col_bounds_lower = {}
-    col_bounds_upper = {}
-    
+    # Map to store all horizontal Y-levels for each column x
+    # Format: { x_index: {y_level_1, y_level_2, ...} }
+    column_folds = {}
+
     for x in range(size_x):
         horizon = 0
         y_prev = 0
-        y_min, y_max = 0, 0
-        y_min_valley, y_max_valley = None, None
-        y_min_mountain, y_max_mountain = None, None
+        levels = [] # Every strip starts with the fold at 0
+        
         for z in range(size_z):
-
-            # find top-most voxel at this (x, z)
             column = np.where(grid[x, :, z] == 1)[0]
             y_val = column.max() + 1 if column.size > 0 else 0
             z_val = -size_z + z
 
-            # no fold if there's no change in height
             if y_val <= y_prev:
                 continue
 
-            # current line positions
-            valley_y = z_val + horizon
-            mountain_y = z_val + horizon + (y_val - y_prev)
+            v_y = z_val + horizon
+            m_y = z_val + horizon + (y_val - y_prev)
             
-            # draw valley folds
-            ax.plot([x, x+1], [valley_y, valley_y], color='blue', lw=2)
+            ax.plot([x, x+1], [v_y, v_y], color='blue', lw=2)
+            ax.plot([x, x+1], [m_y, m_y], color='red', lw=2)
 
-            # draw mountain folds
-            ax.plot([x, x+1], [mountain_y, mountain_y], color='red', lw=2)
-
-            # update baseline and horizon
+            levels.append(v_y)
+            levels.append(m_y)
             horizon += (y_val - y_prev)
             y_prev = y_val
-
-            # update y_min and y_max for this column
-            if y_min_valley is None:
-                y_min_valley = valley_y
-            if y_max_valley is None:
-                y_max_valley = valley_y
-            if y_min_mountain is None:
-                y_min_mountain = mountain_y
-            if y_max_mountain is None:
-                y_max_mountain = mountain_y
-            y_min_valley = min(y_min_valley, valley_y)
-            y_max_valley = max(y_max_valley, valley_y)
-            y_min_mountain = min(y_min_mountain, mountain_y)
-            y_max_mountain = max(y_max_mountain, mountain_y)
         
-        # after iterating draw the new horizon line for this column
-        # if there were no folds, this will just be a straight line at the current horizon level
         ax.plot([x, x+1], [horizon, horizon], color='blue', lw=2)
+        levels.append(horizon)
+        column_folds[x] = levels
 
-        # update y_min and y_max for this column
-        if y_min_valley is None:
-            y_min_valley = 0
-        if y_max_valley is None:
-            y_max_valley = 0
-        if y_min_mountain is None:
-            y_min_mountain = 0
-        if y_max_mountain is None:
-            y_max_mountain = 0
-        y_max_valley = max(y_max_valley, horizon)
-        col_bounds_lower[x] = (y_min_valley, y_min_mountain)
-        col_bounds_upper[x] = (y_max_valley, y_max_mountain)
-    
-    # add cuts between maximum mountain and valley folds
-    for x in range(size_x + 1):
-        # get upper and lower bounds of mountain and valley folds for this column and the previous one
-        upper_left = col_bounds_upper.get(x-1, (0, 0))
-        lower_left = col_bounds_lower.get(x-1, (0, 0))
-        upper_right = col_bounds_upper.get(x, (0, 0))
-        lower_right = col_bounds_lower.get(x, (0, 0))
+    # draw cuts
+    for x in range(1, size_x):
+        left_levels = column_folds.get(x-1, [])
+        right_levels = column_folds.get(x, [])
+        all_levels = left_levels + right_levels
+        
+        # get only levels appearing only once at this boundary
+        unique_levels = [level for level in all_levels if all_levels.count(level) == 1]
+        unique_levels.sort()
 
-        # check whether to draw a cut between mountain folds on the RIGHT
-        if upper_left[1] != upper_right[1]:
-            # if valley folds are contiguous or within the mountain folds, draw a cut between the mountain folds
-            if upper_left[0] == upper_right[0] or (upper_right[0] <= upper_right[1]):
-                ax.plot([x, x], [lower_right[1], upper_right[1]], color='black', lw=2)
+        if len(unique_levels) < 2:
+            continue
 
-        # check whether to draw a cut between mountain folds on the LEFT
-        if upper_left[1] != upper_right[1]:
-            # if valley folds are contiguous or within the mountain folds, draw a cut between the mountain folds
-            if upper_left[0] == upper_right[0] or (upper_left[0] <= upper_left[1]):
-                ax.plot([x, x], [lower_left[1], upper_left[1]], color='black', lw=2)
+        ax.plot([x, x], [unique_levels[0], unique_levels[-1]], color='black', lw=2)
 
-        # check whether to draw a cut between valley folds on the RIGHT
-        if lower_left[0] != lower_right[0]:
-            # if mountain folds are contiguous or within the valley folds, draw a cut between the valley folds
-            if lower_left[1] == lower_right[1] or (lower_right[1] >= lower_right[0]):
-                ax.plot([x, x], [lower_right[0], upper_right[0]], color='black', lw=2)
-
-        # check whether to draw a cut between valley folds on the LEFT
-        if lower_left[0] != lower_right[0]:
-            # if mountain folds are contiguous or within the valley folds, draw a cut between the valley folds
-            if lower_left[1] == lower_right[1] or (lower_left[1] >= lower_left[0]):
-                ax.plot([x, x], [lower_left[0], upper_left[0]], color='black', lw=2)
-    
     ax.set_aspect('equal')
-    ax.set_xlabel("Width (X)")
-    ax.set_ylabel("Front (floor) (-) <--- Center Fold (0) ---> Back (wall) (+)")
-    plt.title("Centered Blueprint: Red=Mountain, Blue=Valley, Black=Cut")
-    plt.grid(True, which='both', linestyle=':', alpha=0.3)
+    ax.axhline(0, color='grey', alpha=0.3)
+    plt.title("Smart Blueprint: Cuts truncated by continuous folds")
     plt.show()
 
 def visualize_results(initial, final=None, size=10):
