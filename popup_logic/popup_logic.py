@@ -106,7 +106,9 @@ def generate_blueprint(grid):
         levels = [] # Every strip starts with the fold at 0
         
         for z in range(size_z):
-            column = np.where(grid[x, :, z] == 1)[0]
+            # step backwards from the maximum value in z
+            # check whether delta height at x,z is > 0
+            column = np.where(grid[x, :, size_z - 1 - z] == 1)[0]
             y_val = column.max() + 1 if column.size > 0 else 0
             z_val = -size_z + z
 
