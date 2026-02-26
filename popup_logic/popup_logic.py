@@ -6,6 +6,8 @@ def optimize_popup_volume(voxel_grid, add_cost=1.0, remove_cost=1.0):
     Optimizes a 3D voxel grid with custom edit costs.
     add_cost: Weight for adding a missing support voxel.
     remove_cost: Weight for removing a floating or non-monotonic voxel.
+
+    returns final_grid: a new voxel grid that is optimized for stability and foldability.
     """
     x_size, y_max, z_size = voxel_grid.shape
     final_grid = np.zeros_like(voxel_grid)
@@ -14,38 +16,83 @@ def optimize_popup_volume(voxel_grid, add_cost=1.0, remove_cost=1.0):
         dp = np.full((z_size, y_max + 1), float('inf'))
         parent = np.zeros((z_size, y_max + 1), dtype=int)
 
-        # z=0 is the FRONT of the card
+        # z=z_size-1 is the FRONT of the card and z=0 is the BACK WALL
         # Each cell stores the cost of having height h at Z=0, considering the initial configuration
         for h in range(y_max + 1):
-            current_col = voxel_grid[x, :, 0]
+            current_col = voxel_grid[x, :, z_size - 1]  # Front column at z=z_max
             # Cost = (number of 0s below h * add_cost) + (number of 1s above h * remove_cost)
             cost = (np.sum(current_col[h:]) * remove_cost) + \
                    ((h - np.sum(current_col[:h])) * add_cost)
-            dp[0, h] = cost
+            dp[z_size - 1, h] = cost
 
         # complete DP table (monotonic e.g. H[z] must be >= H[z+1])
         for z in range(1, z_size):
+            current_z = z_size - 1 - z  # We fill from front to back
+            min_prev_h = 0
+            min_prev_cost = dp[current_z + 1, 0]
             for h in range(y_max + 1):
-                prev_costs = dp[z-1, :h+1] # only use previous heights that are <= current height
-                min_prev_h = np.argmin(prev_costs)
+                new_cost = dp[current_z + 1, h]
+                min_prev_h = h if new_cost < min_prev_cost else min_prev_h
+                min_prev_cost = min(min_prev_cost, new_cost)
                 
-                current_col = voxel_grid[x, :, z]
+                current_col = voxel_grid[x, :, current_z]
                 edit_cost = (np.sum(current_col[h:]) * remove_cost) + \
                             ((h - np.sum(current_col[:h])) * add_cost)
                 
-                dp[z, h] = dp[z-1, min_prev_h] + edit_cost
-                parent[z, h] = min_prev_h
+                dp[current_z, h] = dp[current_z + 1, min_prev_h] + edit_cost
+                parent[current_z, h] = min_prev_h
 
         # backtrack via parent pointers
         # fill height by placing ones in the final grid up to the chosen height for each z
-        curr_h = np.argmin(dp[z_size-1, :])
-        for z in range(z_size - 1, -1, -1):
+        curr_h = np.argmin(dp[0, :])
+        for z in range(z_size):
             final_grid[x, :curr_h, z] = 1
             curr_h = parent[z, curr_h]
 
     return final_grid
 
+def validate_grid_connectivity(grid):
+    """
+    Validates that every voxel is supported from below and behind.
+
+    grid: 3D numpy array of shape (size_x, size_y, size_z) representing the voxel configuration.
+
+    Returns (is_valid, list_of_errors)
+    is_valid: True if all voxels are properly supported, False otherwise.
+    list_of_errors: A list of dicts with keys 'coord', 'bottom', 'back' indicating the coordinate of the unsupported voxel and which support is missing.
+    """
+    size_x, size_y, size_z = grid.shape
+    errors = []
+    
+    # We find indices where grid == 1
+    filled_indices = np.argwhere(grid == 1)
+    
+    for x, y, z in filled_indices:
+        # Rule 1: Support from BELOW (Y-direction)
+        # If not on the floor (y=0), must have a voxel at y-1
+        has_bottom_support = (y == 0) or (grid[x, y-1, z] == 1)
+        
+        # Rule 2: Support from BEHIND (Z-direction)
+        # If not at the back wall (z = size_z - 1), must have a voxel at z+1
+        # (Assuming Z_max is the back wall based on your previous logic)
+        has_back_support = (z == size_z - 1) or (grid[x, y, z+1] == 1)
+        
+        if not (has_bottom_support and has_back_support):
+            errors.append({
+                "coord": (x, y, z),
+                "bottom": has_bottom_support,
+                "back": has_back_support
+            })
+            
+    is_valid = len(errors) == 0
+    return is_valid, errors
+
 def generate_blueprint(grid):
+    """
+    Generates a 2D blueprint visualization of the optimized popup design.
+    grid: 3D numpy array of shape (size_x, size_y, size_z) representing the voxel configuration.
+    The blueprint will show horizontal fold lines (in red and blue) and vertical cut lines (in black).
+    """
     size_x, size_y, size_z = grid.shape
     fig, ax = plt.subplots(figsize=(size_x, (size_z + size_y) / 2))
 
@@ -98,6 +145,8 @@ def generate_blueprint(grid):
 
     ax.set_aspect('equal')
     ax.axhline(0, color='grey', alpha=0.3)
+    ax.set_xlim(0, size_x)
+    ax.set_ylim(-size_z - 1, size_y + 1)
     plt.title("Smart Blueprint: Cuts truncated by continuous folds")
     plt.show()
 
@@ -130,7 +179,7 @@ def visualize_results(initial, final=None, size=10):
         ax.set_ylabel('Y (^ Height)')
         
         # Z is the depth coming away from the back wall
-        ax.set_zlabel('Z (<- Back Wall | Front ->)')
+        ax.set_zlabel('Z (<- Front Wall | Back Wall ->)')
         
         # Optional: Add text annotations for the "Planes"
         # These put labels directly on the "paper" surfaces
@@ -139,7 +188,7 @@ def visualize_results(initial, final=None, size=10):
         
         # Visual Polish: Make the "Paper" planes visible
         ax.xaxis.set_pane_color((0.95, 0.95, 0.95, 1.0)) # Light grey floor
-        ax.zaxis.set_pane_color((0.9, 0.9, 0.9, 1.0))    # Slightly darker back wall
+        ax.zaxis.set_pane_color((0.6, 0.6, 0.6, 1.0))    # Slightly darker back wall
         
         # Optional: Add grid ticks for every voxel
         ax.set_xticks(range(size + 1))
